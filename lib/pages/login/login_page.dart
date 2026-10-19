@@ -1,135 +1,181 @@
-import 'package:admin_twinhandymans_llc/layout/shell.dart';
-// import 'package:admin_twinhandymans_llc/pages/customers/customers_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../../core/theme.dart';
+import '../../core/core.dart';
+import '../../layout/shell.dart';
+import '../../widgets/widgets.dart';
 
-// =========================================================
-// ROLES  (users/{uid}.role in Firestore)
-// New registrations are 'customer'. Change the field in Firebase
-// to owner / manager / crew to allow admin portal login.
-// =========================================================
-const portalRoles = ['owner', 'manager', 'crew'];
+/// Roles allowed into the admin portal (crew/customer are blocked).
+const kAdminRoles = {'owner', 'admin', 'manager'};
 
 // =========================================================
-// LOGIN CONTROLLER  (logic only; text controllers live in the page)
+// ADMIN AUTH CONTROLLER
 // =========================================================
-class LoginController extends GetxController {
+class AdminAuthController extends GetxController {
   final _auth = FirebaseAuth.instance;
   final _db = FirebaseFirestore.instance;
 
   final isLoading = false.obs;
   final hidePassword = true.obs;
+  final error = RxnString();
 
-  /// Used by main(): decides the first screen on app start.
-  static Future<Widget> startPage() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const LoginView();
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final role = (doc.data()?['role'] ?? 'customer') as String;
-      if (portalRoles.contains(role)) return const Shell();
-    } catch (_) {}
-    await FirebaseAuth.instance.signOut();
-    return const LoginView();
+  /// Reads users/{uid}.role. Returns null if profile missing.
+  Future<String?> fetchRole(String uid) async {
+    final snap = await _db.collection('users').doc(uid).get();
+    if (!snap.exists) return null;
+    return (snap.data()?['role'] as String?)?.toLowerCase();
   }
 
-  Future<void> login({required String email, required String password}) async {
+  Future<void> signIn(String email, String password) async {
     email = email.trim();
     password = password.trim();
+    error.value = null;
 
-    // ---------- Validation ----------
     if (email.isEmpty || password.isEmpty) {
-      return _error('Please enter email and password');
+      error.value = 'Please enter your email and password.';
+      return;
     }
     if (!GetUtils.isEmail(email)) {
-      return _error('Please enter a valid email address');
+      error.value = 'Please enter a valid email address.';
+      return;
     }
 
     try {
       isLoading.value = true;
 
-      // 1) Firebase Auth sign in
+      // 1) Firebase Auth
       final cred = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+      final user = cred.user!;
 
-      // 2) Read role from Firestore users/{uid}
-      final doc = await _db.collection('users').doc(cred.user!.uid).get();
-      final role = (doc.data()?['role'] ?? 'customer') as String;
-
-      // 3) Only owner / manager / crew can enter the admin portal
-      if (!portalRoles.contains(role)) {
+      // 2) Role check in Firestore (users/{uid})
+      final role = await fetchRole(user.uid);
+      if (role == null || !kAdminRoles.contains(role)) {
         await _auth.signOut();
-        return _error('Access denied. This account is not an admin account.');
+        error.value = 'This account does not have admin access.';
+        return;
       }
 
+      // 3) Success
       Get.offAll(() => const Shell());
     } on FirebaseAuthException catch (e) {
-      _error(_authMessage(e.code));
+      error.value = _message(e.code);
+    } on FirebaseException catch (e) {
+      await _auth.signOut();
+      error.value = e.code == 'permission-denied'
+          ? 'You do not have permission to access the admin portal.'
+          : 'Could not verify your account. Please try again.';
     } catch (_) {
-      _error('Something went wrong. Please try again.');
+      await _auth.signOut();
+      error.value = 'Something went wrong. Please try again.';
     } finally {
       isLoading.value = false;
     }
   }
 
-  Future<void> forgotPassword(String email) async {
+  Future<void> resetPassword(String email) async {
     email = email.trim();
     if (!GetUtils.isEmail(email)) {
-      return _error('Enter your email first, then tap Forgot password');
+      error.value = 'Enter your email above, then tap "Forgot password?".';
+      return;
     }
     try {
+      isLoading.value = true;
+      error.value = null;
       await _auth.sendPasswordResetEmail(email: email);
-      Get.snackbar('Email sent', 'Check your inbox to reset your password.');
+      Get.snackbar('Email sent', 'Check $email for a password reset link.');
     } on FirebaseAuthException catch (e) {
-      _error(_authMessage(e.code));
+      error.value = _message(e.code);
+    } finally {
+      isLoading.value = false;
     }
   }
 
-  void _error(String msg) => Get.snackbar('Error', msg);
+  Future<void> signOut() async {
+    await _auth.signOut();
+    Get.offAll(() => const LoginPage());
+  }
 
-  String _authMessage(String code) {
+  String _message(String code) {
     switch (code) {
+      case 'invalid-email':
+        return 'That email address is not valid.';
+      case 'user-disabled':
+        return 'This account has been disabled.';
       case 'user-not-found':
       case 'wrong-password':
       case 'invalid-credential':
-        return 'Incorrect email or password';
-      case 'invalid-email':
-        return 'Invalid email address';
-      case 'user-disabled':
-        return 'This account has been disabled';
+        return 'Incorrect email or password.';
       case 'too-many-requests':
-        return 'Too many attempts. Try again later';
+        return 'Too many attempts. Please wait a moment and try again.';
       case 'network-request-failed':
-        return 'No internet connection';
+        return 'Network error. Check your connection.';
       default:
-        return 'Login failed ($code)';
+        return 'Sign in failed ($code).';
     }
   }
 }
 
 // =========================================================
-// LOGIN PAGE
+// AUTH GATE – use as `home:` so refresh/reopen keeps admin
+// signed in, and non-admins always land on LoginPage.
 // =========================================================
-class LoginView extends StatefulWidget {
-  const LoginView({super.key});
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
   @override
-  State<LoginView> createState() => _LoginViewState();
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final user = snap.data;
+        if (user == null) return const LoginPage();
+
+        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          future: FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get(),
+          builder: (context, roleSnap) {
+            if (roleSnap.connectionState != ConnectionState.done) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final role = (roleSnap.data?.data()?['role'] as String?)
+                ?.toLowerCase();
+            if (roleSnap.hasError ||
+                role == null ||
+                !kAdminRoles.contains(role)) {
+              FirebaseAuth.instance.signOut();
+              return const LoginPage();
+            }
+            return const Shell();
+          },
+        );
+      },
+    );
+  }
 }
 
-class _LoginViewState extends State<LoginView> {
-  final c = Get.put(LoginController());
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
 
-  // The page owns its text controllers and disposes them safely
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final c = Get.put(AdminAuthController());
   final _email = TextEditingController();
   final _password = TextEditingController();
 
@@ -140,12 +186,11 @@ class _LoginViewState extends State<LoginView> {
     super.dispose();
   }
 
-  void _submit() => c.login(email: _email.text, password: _password.text);
+  void _submit() => c.signIn(_email.text, _password.text);
 
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.of(context).size.width >= 900;
-
     final form = Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(28),
@@ -155,7 +200,7 @@ class _LoginViewState extends State<LoginView> {
             () => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!wide) ...[const _Logo(), const SizedBox(height: 28)],
+                if (!wide) ...[const Logo(), const SizedBox(height: 28)],
                 const Text(
                   'Admin Sign In',
                   style: TextStyle(
@@ -172,8 +217,10 @@ class _LoginViewState extends State<LoginView> {
                 const SizedBox(height: 28),
                 TextField(
                   controller: _email,
+                  enabled: !c.isLoading.value,
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
+                  autofillHints: const [AutofillHints.email],
                   decoration: const InputDecoration(
                     labelText: 'Email',
                     prefixIcon: Icon(Icons.mail_outline),
@@ -182,8 +229,10 @@ class _LoginViewState extends State<LoginView> {
                 const SizedBox(height: 14),
                 TextField(
                   controller: _password,
+                  enabled: !c.isLoading.value,
                   obscureText: c.hidePassword.value,
                   textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.password],
                   onSubmitted: (_) => _submit(),
                   decoration: InputDecoration(
                     labelText: 'Password',
@@ -198,11 +247,20 @@ class _LoginViewState extends State<LoginView> {
                     ),
                   ),
                 ),
+                if (c.error.value != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    c.error.value!,
+                    style: const TextStyle(color: Colors.red, fontSize: 13),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () => c.forgotPassword(_email.text),
+                    onPressed: c.isLoading.value
+                        ? null
+                        : () => c.resetPassword(_email.text),
                     child: const Text('Forgot password?'),
                   ),
                 ),
@@ -213,19 +271,16 @@ class _LoginViewState extends State<LoginView> {
                     onPressed: c.isLoading.value ? null : _submit,
                     child: c.isLoading.value
                         ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.white,
-                            ),
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
                           )
                         : const Text('SIGN IN'),
                   ),
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Only owner, manager and crew accounts can sign in here.',
+                  'Authorized staff only. Owner and manager accounts are created by the business owner.',
                   style: TextStyle(color: C.muted, fontSize: 12),
                 ),
               ],
@@ -244,11 +299,10 @@ class _LoginViewState extends State<LoginView> {
                   child: Container(
                     color: C.navy,
                     padding: const EdgeInsets.all(56),
-                    child: const Column(
+                    child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _Logo(light: true),
+                      children: const [
                         SizedBox(height: 40),
                         Text(
                           'Run your contracting\nbusiness from one place.',
@@ -278,154 +332,3 @@ class _LoginViewState extends State<LoginView> {
     );
   }
 }
-
-class _Logo extends StatelessWidget {
-  final bool light;
-  const _Logo({this.light = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: C.orange,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(Icons.handyman, color: Colors.white, size: 22),
-        ),
-        const SizedBox(width: 10),
-        Text(
-          'Twins Handyman',
-          style: TextStyle(
-            color: light ? Colors.white : C.navy,
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// import 'package:flutter/material.dart';
-// import 'package:get/get.dart';
-
-// import '../../core/core.dart';
-// import '../../layout/shell.dart';
-// import '../../widgets/widgets.dart';
-
-// class LoginPage extends StatelessWidget {
-//   const LoginPage({super.key});
-//   @override
-//   Widget build(BuildContext context) {
-//     final wide = MediaQuery.of(context).size.width >= 900;
-//     final form = Center(
-//       child: SingleChildScrollView(
-//         padding: const EdgeInsets.all(28),
-//         child: ConstrainedBox(
-//           constraints: const BoxConstraints(maxWidth: 400),
-//           child: Column(
-//             crossAxisAlignment: CrossAxisAlignment.start,
-//             children: [
-//               if (!wide) ...[const Logo(), const SizedBox(height: 28)],
-//               const Text(
-//                 'Admin Sign In',
-//                 style: TextStyle(
-//                   fontSize: 28,
-//                   fontWeight: FontWeight.w900,
-//                   color: C.navy,
-//                 ),
-//               ),
-//               const SizedBox(height: 6),
-//               const Text(
-//                 'Manage quotes, jobs, payments and customers.',
-//                 style: TextStyle(color: C.muted),
-//               ),
-//               const SizedBox(height: 28),
-//               const TextField(
-//                 decoration: InputDecoration(
-//                   labelText: 'Email',
-//                   prefixIcon: Icon(Icons.mail_outline),
-//                 ),
-//               ),
-//               const SizedBox(height: 14),
-//               const TextField(
-//                 obscureText: true,
-//                 decoration: InputDecoration(
-//                   labelText: 'Password',
-//                   prefixIcon: Icon(Icons.lock_outline),
-//                 ),
-//               ),
-//               const SizedBox(height: 8),
-//               Align(
-//                 alignment: Alignment.centerRight,
-//                 child: TextButton(
-//                   onPressed: () {},
-//                   child: const Text('Forgot password?'),
-//                 ),
-//               ),
-//               const SizedBox(height: 8),
-//               SizedBox(
-//                 width: double.infinity,
-//                 child: ElevatedButton(
-//                   onPressed: () => Get.off(() => const Shell()),
-//                   child: const Text('SIGN IN'),
-//                 ),
-//               ),
-//               const SizedBox(height: 12),
-//               const Text(
-//                 'Demo mode: tap Sign In to continue. MFA is enabled for owner accounts.',
-//                 style: TextStyle(color: C.muted, fontSize: 12),
-//               ),
-//             ],
-//           ),
-//         ),
-//       ),
-//     );
-//     return Scaffold(
-//       backgroundColor: Colors.white,
-//       body: wide
-//           ? Row(
-//               children: [
-//                 Expanded(
-//                   child: Container(
-//                     color: C.navy,
-//                     padding: const EdgeInsets.all(56),
-//                     child: Column(
-//                       mainAxisAlignment: MainAxisAlignment.center,
-//                       crossAxisAlignment: CrossAxisAlignment.start,
-//                       children: const [
-//                         // Logo(light: true),
-//                         SizedBox(height: 40),
-//                         Text(
-//                           'Run your contracting\nbusiness from one place.',
-//                           style: TextStyle(
-//                             color: Colors.white,
-//                             fontSize: 40,
-//                             fontWeight: FontWeight.w900,
-//                             height: 1.1,
-//                           ),
-//                         ),
-//                         SizedBox(height: 18),
-//                         Text(
-//                           'Quotes • Jobs • Scheduling • Invoices • Payments • Reviews',
-//                           style: TextStyle(
-//                             color: Color(0xFFB8C4D6),
-//                             fontSize: 16,
-//                           ),
-//                         ),
-//                       ],
-//                     ),
-//                   ),
-//                 ),
-//                 Expanded(child: form),
-//               ],
-//             )
-//           : form,
-//     );
-//   }
-// }

@@ -109,7 +109,7 @@ class SideNav extends StatelessWidget {
             ),
             const Divider(height: 1, color: C.navy2),
             InkWell(
-              onTap: () => Get.offAll(() => const LoginView()),
+              onTap: () => Get.offAll(() => const LoginPage()),
               child: Container(
                 height: 56,
                 padding: EdgeInsets.symmetric(horizontal: extended ? 22 : 0),

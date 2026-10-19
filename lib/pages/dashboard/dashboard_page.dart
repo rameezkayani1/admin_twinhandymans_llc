@@ -283,7 +283,7 @@ class DashboardPage extends StatelessWidget {
                               'Budget ${money(r.budget)} • ${fmtDate(r.date)}',
                             ),
                             trailing: const Icon(Icons.chevron_right),
-                            onTap: () => openRequest(context, r),
+                            onTap: () => RequestsPage(),
                           ),
                       ],
                     ),

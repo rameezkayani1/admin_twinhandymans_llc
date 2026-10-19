@@ -26,7 +26,7 @@ class Shell extends StatelessWidget {
       case 0:
         return const DashboardPage();
       case 1:
-        return const CustomersView();
+        return const CustomersPage();
       case 2:
         return const RequestsPage();
       case 3:
