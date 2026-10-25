@@ -1,3 +1,5 @@
+import 'package:admin_twinhandymans_llc/old/models/job.dart';
+import 'package:admin_twinhandymans_llc/old/pages/jobs/jobs_page.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -157,7 +159,7 @@ class CalendarPage extends StatelessWidget {
                             color: Color(0xFFFAFBFC),
                           ),
                           child: InkWell(
-                            onTap: () => openJob(context, j),
+                            onTap: () => openJob(context, j as Job),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
