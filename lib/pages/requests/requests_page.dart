@@ -18,7 +18,8 @@
 // Customer approves  -> status 'accepted' (customer app).
 // Admin marks advance received -> advancePaid=true (UI stage "Deposit Paid").
 // Admin schedules -> status 'scheduled', scheduledDate, scheduledSlot.
-// Admin completes -> status 'completed'; balance can be marked received.
+// Scheduled stage -> admin opens the route to the job (Google Maps).
+// 'completed' is set via the Override status menu.
 //
 // Packages: cloud_firestore, firebase_auth, firebase_storage,
 //           url_launcher, get
@@ -95,7 +96,7 @@ const _nextHint = <String, String>{
   'changes_requested': 'Revise & resend quote',
   'accepted': 'Collect advance payment',
   'paid': 'Schedule the job',
-  'scheduled': 'Complete the job',
+  'scheduled': 'Route to job',
   'completed': 'Collect balance',
   'rejected': 'Closed',
   'cancelled': 'Closed',
@@ -1729,28 +1730,12 @@ class _ActionPanelState extends State<_ActionPanel> {
     );
   }
 
-  Future<void> _complete() async {
-    if (!await _confirm(
-      context,
-      'Mark job completed?',
-      'The remaining balance of ${_money(r.later)} becomes due.',
-      ok: 'Complete',
-      color: _green,
-    )) {
-      return;
-    }
-    await _run(
-      () => _Api.move(
-        r,
-        'completed',
-        note: 'Job completed',
-        msg:
-            'Your ${r.service} job is complete. Balance due: ${_money(r.later)}.',
-        title: 'Job completed',
-      ),
-      'Job completed',
-    );
-  }
+  /// Opens Google Maps directions to the customer's address.
+  Future<void> _showRoute() => _open(
+    'https://www.google.com/maps/dir/?api=1'
+    '&destination=${Uri.encodeComponent(r.s('address'))}'
+    '&travelmode=driving',
+  );
 
   Future<void> _markBalance() async {
     if (!await _confirm(
@@ -2054,7 +2039,7 @@ class _ActionPanelState extends State<_ActionPanel> {
           children: [
             _title(
               'Job scheduled',
-              'When the work is done, mark it completed to request the balance.',
+              'Open the route to the customer\'s address when you are ready to head out.',
             ),
             _box(
               color: _bg,
@@ -2064,9 +2049,31 @@ class _ActionPanelState extends State<_ActionPanel> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${r.scheduled == null ? '—' : _d(r.scheduled!)}\n${r.s('preferredSlot').isEmpty ? '' : ''}${r.s('scheduledSlot')}',
+                      '${r.scheduled == null ? '—' : _d(r.scheduled!)}\n${r.s('scheduledSlot')}',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _box(
+              color: _bg,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.location_on_outlined, color: _orange),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: SelectableText(
+                      r.s('address').isEmpty
+                          ? 'No address provided'
+                          : r.s('address'),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
                         height: 1.4,
                       ),
                     ),
@@ -2078,11 +2085,9 @@ class _ActionPanelState extends State<_ActionPanel> {
             _paidBanner(),
             const SizedBox(height: 14),
             _btn(
-              'Mark job completed',
-              Icons.task_alt_rounded,
-              _complete,
-              color: _green,
-              busy: _busy,
+              'Go to job Page and assinge as someone',
+              Icons.directions_rounded,
+              null,
             ),
           ],
         );
@@ -2622,7 +2627,6 @@ class _AttTileState extends State<_AttTile> {
     );
   }
 }
-
 // // =============================================================
 // // requests_page.dart — Admin: Quote Requests (simple pipeline)
 // //
