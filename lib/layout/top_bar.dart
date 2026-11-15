@@ -70,7 +70,7 @@ class TopBar extends StatelessWidget {
             radius: 17,
             backgroundColor: C.navy,
             child: Text(
-              'MI',
+              'TH',
               style: TextStyle(
                 color: C.yellow,
                 fontSize: 12,
@@ -85,7 +85,7 @@ class TopBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Mathew Ihemesie',
+                  'Twin Handyman\'s LLC',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
                 Text('Owner', style: TextStyle(color: C.muted, fontSize: 11)),
