@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:firebase_core/firebase_core.dart';
 
-import 'core/core.dart';
-import 'pages/login/login_page.dart';
-import 'controllers/app_controller.dart';
+import 'Admin/controllers/core/core.dart';
+import 'login_page.dart';
+import 'Admin/controllers/app_controller.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
