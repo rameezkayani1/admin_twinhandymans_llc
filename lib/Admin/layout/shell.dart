@@ -1,4 +1,5 @@
 import 'package:admin_twinhandymans_llc/Admin/pages/role.dart';
+import 'package:admin_twinhandymans_llc/Sale_System/admin_approval.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -26,7 +27,9 @@ class Shell extends StatelessWidget {
   Widget _page(int i) {
     switch (i) {
       case Pg.dashboard:
-        return const DashboardPage();
+        return const RepManagementPage();
+
+      // return const DashboardPage();
       case Pg.customers:
         return const CustomersPage();
       case Pg.requests:
